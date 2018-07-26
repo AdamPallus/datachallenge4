@@ -1,6 +1,9 @@
 ---
-title: "Data Challenge 4: Red Cards and Skin Tone"
-output: html_notebook
+title: 'Data Challenge 4: Red Cards and Skin Tone'
+output:
+  html_notebook: default
+  html_document: default
+  pdf_document: default
 ---
 
 #Introduction 
@@ -11,10 +14,18 @@ The data set consists of information about players, information about the penalt
 
 We also have information about the "implicit bias"" countries that the referees were from,
 
+# Results
+1. Some refs are biased
+2. mean implicit bias is predictive of red cards
+3. overall because many ref are used, no significant correlation with skin tone
+
 ```{r}
 library(ggplot2)
+library(ggthemes)
 library(dplyr)
 library(knitr)
+library(pscl)
+
 ```
 
 ```{r}
@@ -30,7 +41,8 @@ As a first pass, I will average the ratings for the two raters since they largel
 ```{r rater variance}
 qplot(rater1,rater2,data=rc)+
   geom_jitter()+
-  geom_title('How well did the two raters agree on skin tone?')
+  ggtitle('How well did the two raters agree on skin tone?')+
+  theme_fivethirtyeight()
 ```
 
 
@@ -125,9 +137,9 @@ player_summary %>%
 ```
 
 We are missing skin tone information from 468/2053 (23%) of players. 
-Of those with data, most were considered to have dark skin by the raters (skin tone <= 0.25)
+Of those with data, most were considered to have light skin by the raters (skin tone <= 0.25)
 Most players did not receive any red cards during the season. Only a small number of players received more than 5 red cards in the season. 
-All players who received more than 6 red cards were considered darker than average. 
+All players who received more than 6 red cards were considered lighter than average. 
 
 
 ## Referees 
@@ -139,8 +151,8 @@ rcm %>%
   filter(!is.na(mean_rating)) %>%
   group_by(refNum) %>%
   summarize(total_reds_given = sum(redCards),
-            total_reds_dark = sum(redCards[mean_rating<= 0.25]),
-            total_reds_light = sum(redCards[mean_rating>= 0.75]))->
+            total_reds_light = sum(redCards[mean_rating<= 0.25]),
+            total_reds_dark = sum(redCards[mean_rating>= 0.75]))->
   ref_summary
 
 qplot(total_reds_given,data=ref_summary)
@@ -151,8 +163,84 @@ ggplot(ref_summary %>% filter(total_reds_given > 0),
   ggtitle("Refs who gave at least one red card")
 ```
 Most refs never give out any red cards.
-Of those who do give out red cards, most give one red card to a player whow as rated to have darker skin and none to any players rated to have light skin. 
+Of those who do give out red cards, most give one red card to a player who was rated to have lighter skin and none to any players rated to have darker skin. 
+
+However, there are 1123 players who were rated light and only 236 who were rated light. Can we adjust for this?
+
+```{r}
+ggplot(ref_summary %>% filter(total_reds_given > 0),
+       aes(total_reds_dark, total_reds_light*4.7))+
+  geom_hex()+
+  geom_abline()+
+  ggtitle("Refs who gave at least one red card")
+```
 
 
+```{r simple_regression}
+rcm %>%
+  mutate(binary_redCards = redCards >= 1) ->
+  rcm
+m <- glm(binary_redCards~mean_rating,data = rcm, family='binomial')
+summary(m)
+```
 
+```{r}
+player_summary %>% 
+  mutate(any_red = total_red_cards >0) ->
+  player_summary
+
+m <- glm(any_red ~ color, data= player_summary, family = 'binomial')
+summary(m)
+```
+```{r}
+
+m <- glm(total_red_cards ~ dark, data= player_summary %>% 
+           filter(color != 'missing'), family = 'poisson')
+summary(m)
+```
+```{r zero-inflated}
+#zero inflated poisson model?
+m <- zeroinfl(total_red_cards ~ skin_tone, data= player_summary %>% 
+           filter(color != 'missing'))
+summary(m)
+```
+```{r}
+total_red_cards
+```
+
+
+```{r}
+
+m <- glm(any_red ~ skin_tone, data= player_summary %>% filter(color != 'missing'), family = 'binomial')
+summary(m)
+```
+
+```{r}
+rcm %>%
+  filter(!is.na(mean_rating)) %>%
+  group_by(refNum) %>%
+  summarize(total_reds_given = sum(redCards),
+            total_reds_light = sum(redCards[mean_rating<= 0.25]),
+            total_reds_dark = sum(redCards[mean_rating>= 0.75]),
+            meanIAT = first(meanIAT),
+            meanExp = first(meanExp),
+            dark_reds_proportion = total_reds_dark/total_reds_given) ->
+  ref_summary
+
+ref_summary$refNum<- as.factor(ref_summary$refNum)
+```
+
+```{r}
+m <- glm(dark_reds_proportion ~ meanIAT,data = ref_summary, family = 'gaussian')
+summary(m)
+```
+
+```{r}
+m <- glm(dark_reds_proportion ~ meanExp,data = ref_summary, family = 'gaussian')
+summary(m)
+```
+
+```{r}
+
+```
 
