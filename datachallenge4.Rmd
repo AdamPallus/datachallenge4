@@ -1,0 +1,158 @@
+---
+title: "Data Challenge 4: Red Cards and Skin Tone"
+output: html_notebook
+---
+
+#Introduction 
+
+In this data challenge, we seek to answer the question “Are soccer referees more likely to give red cards to dark skin toned players than light skin toned players?”
+
+The data set consists of information about players, information about the penalty cards they received, and information about the referees who issued the cards.
+
+We also have information about the "implicit bias"" countries that the referees were from,
+
+```{r}
+library(ggplot2)
+library(dplyr)
+library(knitr)
+```
+
+```{r}
+rc <- read.csv('redcard.csv')
+head(rc)
+```
+
+#The Data
+
+All of these data come from the same season, 2012-2013 so I think we can just look at the birth year for age. 
+As a first pass, I will average the ratings for the two raters since they largely agree on skin tone. 
+
+```{r rater variance}
+qplot(rater1,rater2,data=rc)+
+  geom_jitter()+
+  geom_title('How well did the two raters agree on skin tone?')
+```
+
+
+```{r}
+
+rc %>% 
+  mutate(birthday = as.character(birthday),
+         birthyear = substr(birthday,7,10),
+         mean_rating = (rater1+rater2)/2) ->
+  rcm
+```
+
+```{r}
+head(rcm)
+```
+
+Variable Name | Description
+------------- | -------------
+meanIAT | mean implicit bias score (using the race IAT) for referee country
+nIAT | sample size for race IAT in that particular country
+seIAT | standard error for mean estimate of race IAT  
+meanExp | mean explicit bias score (using a racial thermometer task) for referee country
+nExp | sample size for explicit bias in that particular country
+seExp |standard error for mean estimate of explicit bias measure
+
+```{r}
+rcm %>%
+  group_by(playerShort) %>%
+  summarize(position=unique(position))%>%
+  ungroup() %>%
+  summarize(missing_positions = sum(position == ''),
+            total_players = n(),
+            percent_missing = missing_positions/total_players) ->
+  player_positions
+
+kable(player_positions)
+```
+We are missing a lot of information about the positions of the players. 
+We are also missing a lot of information about the skin tone of many players. 
+
+# Results
+
+There are two ways to look at this problem:
+1. From the perspective of the players
+2. from the persepctive of the referees
+
+The question is posed in reference to the referees, but it will be useful to look at the players first.
+
+##The Players
+
+First let's make a plot to answer the question of whether there is a correlation between a players perceived skin tone and the number of red cards they receive:
+
+```{r}
+
+
+rcm %>%
+  group_by(playerShort) %>%
+  summarize(total_red_cards = sum(redCards),
+            skin_tone = first(mean_rating)) %>%
+  mutate(dark = skin_tone <= 0.25,
+         light = skin_tone >= 0.75)->
+  player_summary
+
+player_summary$color = "mixed"
+player_summary$color[is.na(player_summary$skin_tone)] = 'missing'
+player_summary$color[player_summary$dark] = "dark"
+player_summary$color[player_summary$light] = "light"
+player_summary$color <- as.factor(player_summary$color)
+
+qplot(skin_tone,data= player_summary)
+
+qplot(total_red_cards, data= player_summary)
+
+player_summary%>%
+  filter(total_red_cards > 0) %>%
+  ggplot(aes(skin_tone,total_red_cards))+
+  geom_jitter()
+
+player_summary%>%
+  filter(total_red_cards > 6) %>%
+  ggplot(aes(skin_tone,total_red_cards))+
+  geom_jitter()+
+  ggtitle('Players with more than 6 red cards')
+
+player_summary %>%
+  ggplot(aes(color,total_red_cards))+
+  geom_boxplot()
+
+player_summary %>%
+  group_by(color) %>%
+  tally()
+```
+
+We are missing skin tone information from 468/2053 (23%) of players. 
+Of those with data, most were considered to have dark skin by the raters (skin tone <= 0.25)
+Most players did not receive any red cards during the season. Only a small number of players received more than 5 red cards in the season. 
+All players who received more than 6 red cards were considered darker than average. 
+
+
+## Referees 
+
+Now let's group by referees and see whether individual referees are more likely to give red cards to darker skinned players. 
+
+```{r}
+rcm %>%
+  filter(!is.na(mean_rating)) %>%
+  group_by(refNum) %>%
+  summarize(total_reds_given = sum(redCards),
+            total_reds_dark = sum(redCards[mean_rating<= 0.25]),
+            total_reds_light = sum(redCards[mean_rating>= 0.75]))->
+  ref_summary
+
+qplot(total_reds_given,data=ref_summary)
+    
+ggplot(ref_summary %>% filter(total_reds_given > 0),
+       aes(total_reds_dark, total_reds_light))+
+  geom_hex()+
+  ggtitle("Refs who gave at least one red card")
+```
+Most refs never give out any red cards.
+Of those who do give out red cards, most give one red card to a player whow as rated to have darker skin and none to any players rated to have light skin. 
+
+
+
+
